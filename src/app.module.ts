@@ -1,0 +1,56 @@
+import { Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
+import { LoggerModule } from "nestjs-pino";
+import { appConfig } from "./config/app.config";
+import { validateEnv } from "./config/env.validation";
+import { DatabaseModule } from "./database/database.module";
+import { HealthModule } from "./health/health.module";
+import { AuthModule } from "./modules/auth/auth.module";
+import { CartModule } from "./modules/cart/cart.module";
+import { CatalogModule } from "./modules/catalog/catalog.module";
+import { CustomersModule } from "./modules/customers/customers.module";
+import { FulfillmentModule } from "./modules/fulfillment/fulfillment.module";
+import { InventoryModule } from "./modules/inventory/inventory.module";
+import { OrdersModule } from "./modules/orders/orders.module";
+import { PaymentsModule } from "./modules/payments/payments.module";
+import { ReviewsModule } from "./modules/reviews/reviews.module";
+import { SellersModule } from "./modules/sellers/sellers.module";
+import { UsersModule } from "./modules/users/users.module";
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      load: [appConfig],
+      validate: validateEnv,
+    }),
+    LoggerModule.forRoot({
+      pinoHttp: {
+        level: process.env.NODE_ENV === "production" ? "info" : "debug",
+        transport:
+          process.env.NODE_ENV === "production"
+            ? undefined
+            : {
+                target: "pino-pretty",
+                options: {
+                  singleLine: true,
+                },
+              },
+      },
+    }),
+    DatabaseModule,
+    HealthModule,
+    AuthModule,
+    UsersModule,
+    CustomersModule,
+    SellersModule,
+    CatalogModule,
+    InventoryModule,
+    CartModule,
+    OrdersModule,
+    PaymentsModule,
+    FulfillmentModule,
+    ReviewsModule,
+  ],
+})
+export class AppModule {}
