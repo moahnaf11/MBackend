@@ -31,6 +31,15 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException("Invalid access token.");
     }
+    const session = await this.prisma.authSession.findUnique({
+      where: {
+        id: payload.sessionId,
+      },
+    });
+
+    if (!session) {
+      throw new UnauthorizedException("Session revoked.");
+    }
 
     return {
       id: user.id,

@@ -18,8 +18,12 @@ import {
   REFRESH_TOKEN_TTL_SECONDS,
 } from "./auth.constants";
 import { AuthService } from "./auth.service";
+import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterDto } from "./dto/register.dto";
+import { RequestEmailVerificationDto } from "./dto/request-email-verification.dto";
+import { ResetPasswordDto } from "./dto/reset-password.dto";
+import { VerifyEmailDto } from "./dto/verify-email.dto";
 import { GoogleAuthGuard } from "./guards/google-auth.guard";
 import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 import type { AuthenticatedRequest, GoogleRequest } from "./types/auth.types";
@@ -36,7 +40,10 @@ export class AuthController {
   async register(@Body() dto: RegisterDto, @Req() req: Request, @Res() res: Response) {
     const result = await this.authService.register(dto, this.getRequestMetadata(req));
     this.setAuthCookies(res, result.accessToken, result.refreshToken);
-    return res.status(201).json({ user: result.user });
+    return res.status(201).json({
+      user: result.user,
+      emailVerification: result.emailVerification,
+    });
   }
 
   @HttpCode(200)
@@ -56,6 +63,30 @@ export class AuthController {
     );
     this.setAuthCookies(res, result.accessToken, result.refreshToken);
     return res.json({ user: result.user });
+  }
+
+  @HttpCode(200)
+  @Post("email-verification/request")
+  requestEmailVerification(@Body() dto: RequestEmailVerificationDto) {
+    return this.authService.requestEmailVerification(dto);
+  }
+
+  @HttpCode(200)
+  @Post("email-verification/verify")
+  verifyEmail(@Body() dto: VerifyEmailDto) {
+    return this.authService.verifyEmail(dto);
+  }
+
+  @HttpCode(200)
+  @Post("password/forgot")
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @HttpCode(200)
+  @Post("password/reset")
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
 
   @HttpCode(200)
