@@ -527,15 +527,15 @@ export class AuthService {
     };
   }
 
-  private generateActionToken(): string {
+  generateActionToken(): string {
     return randomBytes(32).toString("hex");
   }
 
-  private hashActionToken(token: string): string {
+  hashActionToken(token: string): string {
     return createHash("sha256").update(token).digest("hex");
   }
 
-  private buildActionUrl(configKey: string, token: string): string {
+  buildActionUrl(configKey: string, token: string): string {
     const baseUrl = this.config.get<string>(configKey) ?? "http://localhost:5173";
     const url = new URL(baseUrl);
     url.searchParams.set("token", token);

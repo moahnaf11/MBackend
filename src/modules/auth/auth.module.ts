@@ -9,6 +9,7 @@ import { EmailModule } from "../email/email.module";
 
 @Module({
   imports: [PassportModule, JwtModule.register({}), EmailModule],
+  exports: [AuthService],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, GoogleStrategy],
 })

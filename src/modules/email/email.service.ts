@@ -39,6 +39,35 @@ export class EmailService {
     });
   }
 
+  async sendEmailChangeVerificationEmail(email: string, verificationUrl: string) {
+    await this.resend.emails.send({
+      from: this.config.getOrThrow<string>("EMAIL_FROM"),
+      to: email,
+      subject: "Verify Your New Email",
+      html: `
+        <h1>Verify your email</h1>
+
+        <p>Click the button below to verify your new email address.</p>
+
+        <a
+          href="${verificationUrl}"
+          style="
+            display:inline-block;
+            padding:12px 20px;
+            background:black;
+            color:white;
+            text-decoration:none;
+            border-radius:8px;
+          "
+        >
+          Verify New Email
+        </a>
+
+        <p>If you did not request an email change please ignore this email</p>
+      `,
+    });
+  }
+
   async sendPasswordResetEmail(email: string, resetUrl: string) {
     await this.resend.emails.send({
       from: this.config.getOrThrow<string>("EMAIL_FROM"),
