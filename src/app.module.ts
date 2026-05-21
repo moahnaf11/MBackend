@@ -8,6 +8,7 @@ import { HealthModule } from "./health/health.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { CartModule } from "./modules/cart/cart.module";
 import { CatalogModule } from "./modules/catalog/catalog.module";
+import { CustomerProfileModule } from "./modules/customer-profile/customer-profile.module";
 import { CustomersModule } from "./modules/customers/customers.module";
 import { FulfillmentModule } from "./modules/fulfillment/fulfillment.module";
 import { InventoryModule } from "./modules/inventory/inventory.module";
@@ -15,6 +16,7 @@ import { OrdersModule } from "./modules/orders/orders.module";
 import { PaymentsModule } from "./modules/payments/payments.module";
 import { ReviewsModule } from "./modules/reviews/reviews.module";
 import { SellersModule } from "./modules/sellers/sellers.module";
+import { StorageModule } from "./modules/storage/storage.module";
 import { UsersModule } from "./modules/users/users.module";
 
 @Module({
@@ -39,10 +41,12 @@ import { UsersModule } from "./modules/users/users.module";
       },
     }),
     DatabaseModule,
+    StorageModule,
     HealthModule,
     AuthModule,
     UsersModule,
     CustomersModule,
+    CustomerProfileModule,
     SellersModule,
     CatalogModule,
     InventoryModule,
