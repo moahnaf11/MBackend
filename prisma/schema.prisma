@@ -26,9 +26,26 @@ enum AuthProvider {
 
 enum SellerStatus {
   PENDING
+  UNDER_REVIEW
+  NEEDS_DOCUMENTS
+  REJECTED
   ACTIVE
   SUSPENDED
   CLOSED
+}
+
+enum SellerDocumentType {
+  PASSPORT
+  BUSINESS_LICENSE
+  TAX_CERTIFICATE
+  BANK_STATEMENT
+  OTHER
+}
+
+enum SellerDocumentStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 enum AddressType {
@@ -233,6 +250,7 @@ model User {
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens     PasswordResetToken[]
   emailChangeTokens       EmailChangeToken[]
+  sellerStatusEvents      SellerStatusEvent[]
 
   @@index([status])
   @@index([createdAt])
@@ -321,28 +339,88 @@ model CustomerProfile {
 }
 
 model SellerProfile {
-  id           String       @id @default(cuid())
-  userId       String       @unique
-  storeName    String
-  slug         String       @unique
-  legalName    String?
-  taxId        String?
-  supportEmail String?
-  logoUrl      String?
-  status       SellerStatus @default(PENDING)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id               String       @id @default(cuid())
+  userId           String       @unique
+  storeName        String
+  slug             String       @unique
+  legalName        String?
+  taxId            String?
+  supportEmail     String?
+  logoUrl          String?
+  bannerUrl        String?
+  description      String?
+  shippingPolicy   String?
+  returnPolicy     String?
+  status           SellerStatus @default(PENDING)
+  rating           Decimal      @default(0) @db.Decimal(3, 2)
+  totalSales       Int          @default(0)
+  fulfillmentScore Decimal      @default(0) @db.Decimal(5, 2)
+  cancellationRate Decimal      @default(0) @db.Decimal(5, 2)
+  statusReason     String?
+  reviewedAt       DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
-  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  products      Product[]
-  orderItems    OrderItem[]
-  promotions    Promotion[]
-  payouts       SellerPayout[]
-  ledgerEntries SellerLedgerEntry[]
-  bankAccounts  SellerBankAccount[]
-  answers       ProductAnswer[]
+  user                  User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products              Product[]
+  orderItems            OrderItem[]
+  promotions            Promotion[]
+  payouts               SellerPayout[]
+  ledgerEntries         SellerLedgerEntry[]
+  bankAccounts          SellerBankAccount[]
+  answers               ProductAnswer[]
+  verificationDocuments SellerVerificationDocument[]
+  statusEvents          SellerStatusEvent[]
+  slugHistory           SellerSlugHistory[]
 
   @@index([status])
+  @@index([rating])
+}
+
+model SellerVerificationDocument {
+  id          String               @id @default(cuid())
+  sellerId    String
+  type        SellerDocumentType
+  status      SellerDocumentStatus @default(PENDING)
+  fileUrl     String
+  fileName    String?
+  contentType String?
+  reviewedAt  DateTime?
+  reviewNote  String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  seller SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  @@index([sellerId, status])
+  @@index([type])
+}
+
+model SellerStatusEvent {
+  id          String        @id @default(cuid())
+  sellerId    String
+  actorUserId String?
+  fromStatus  SellerStatus?
+  toStatus    SellerStatus
+  reason      String?
+  createdAt   DateTime      @default(now())
+
+  seller SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  actor  User?         @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([sellerId, createdAt])
+  @@index([actorUserId])
+}
+
+model SellerSlugHistory {
+  id        String   @id @default(cuid())
+  sellerId  String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  seller SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  @@index([sellerId])
 }
 
 model Address {

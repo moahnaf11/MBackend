@@ -15,6 +15,7 @@ import { InventoryModule } from "./modules/inventory/inventory.module";
 import { OrdersModule } from "./modules/orders/orders.module";
 import { PaymentsModule } from "./modules/payments/payments.module";
 import { ReviewsModule } from "./modules/reviews/reviews.module";
+import { SellerProfileModule } from "./modules/seller-profile/seller-profile.module";
 import { SellersModule } from "./modules/sellers/sellers.module";
 import { StorageModule } from "./modules/storage/storage.module";
 import { UsersModule } from "./modules/users/users.module";
@@ -47,6 +48,7 @@ import { UsersModule } from "./modules/users/users.module";
     UsersModule,
     CustomersModule,
     CustomerProfileModule,
+    SellerProfileModule,
     SellersModule,
     CatalogModule,
     InventoryModule,

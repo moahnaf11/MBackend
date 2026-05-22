@@ -16,11 +16,18 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/webp": "webp",
 };
 
+const DEFAULT_EXTENSIONS: Record<string, string> = {
+  ...IMAGE_EXTENSIONS,
+  "application/pdf": "pdf",
+};
+
 type CreatePresignedUploadInput = {
   folder: string;
   ownerId: string;
   contentType: string;
   sizeBytes: number;
+  allowedContentTypes?: Record<string, string>;
+  maxSizeBytes?: number;
 };
 
 type PresignedUpload = {
@@ -57,14 +64,24 @@ export class StorageService {
   }
 
   async createPresignedImageUpload(input: CreatePresignedUploadInput): Promise<PresignedUpload> {
-    const extension = IMAGE_EXTENSIONS[input.contentType];
+    return this.createPresignedUpload({
+      ...input,
+      allowedContentTypes: IMAGE_EXTENSIONS,
+      maxSizeBytes: this.maxAvatarBytes,
+    });
+  }
+
+  async createPresignedUpload(input: CreatePresignedUploadInput): Promise<PresignedUpload> {
+    const allowedContentTypes = input.allowedContentTypes ?? DEFAULT_EXTENSIONS;
+    const maxSizeBytes = input.maxSizeBytes ?? this.maxAvatarBytes;
+    const extension = allowedContentTypes[input.contentType];
 
     if (!extension) {
-      throw new BadRequestException("Avatar must be a JPEG, PNG, or WebP image.");
+      throw new BadRequestException("Unsupported file type.");
     }
 
-    if (input.sizeBytes <= 0 || input.sizeBytes > this.maxAvatarBytes) {
-      throw new BadRequestException("Avatar image must be 2MB or smaller.");
+    if (input.sizeBytes <= 0 || input.sizeBytes > maxSizeBytes) {
+      throw new BadRequestException(`File must be ${Math.floor(maxSizeBytes / 1024 / 1024)}MB or smaller.`);
     }
 
     const objectKey = `${input.folder}/${input.ownerId}/${randomUUID()}.${extension}`;
