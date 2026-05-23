@@ -6,7 +6,7 @@ export class OwnerOrAdminGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const req = context.switchToHttp().getRequest();
     const user = req.user; // set by JwtAuthGuard
-    const targetId = req.params.id; // the :id in the URL
+    const targetId = req.params.id ?? req.params.userId; // the :id or :userId in the URL
 
     const isOwner = user.id === targetId;
     const isAdmin = user.roles.includes(UserRole.ADMIN);

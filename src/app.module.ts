@@ -19,6 +19,7 @@ import { SellerProfileModule } from "./modules/seller-profile/seller-profile.mod
 import { SellersModule } from "./modules/sellers/sellers.module";
 import { StorageModule } from "./modules/storage/storage.module";
 import { UsersModule } from "./modules/users/users.module";
+import { AddressesModule } from "./modules/addresses/addresses.module";
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { UsersModule } from "./modules/users/users.module";
     CustomersModule,
     CustomerProfileModule,
     SellerProfileModule,
+    AddressesModule,
     SellersModule,
     CatalogModule,
     InventoryModule,
