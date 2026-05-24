@@ -20,6 +20,7 @@ import { SellersModule } from "./modules/sellers/sellers.module";
 import { StorageModule } from "./modules/storage/storage.module";
 import { UsersModule } from "./modules/users/users.module";
 import { AddressesModule } from "./modules/addresses/addresses.module";
+import { CategoriesModule } from "./modules/categories/categories.module";
 
 @Module({
   imports: [
@@ -37,7 +38,7 @@ import { AddressesModule } from "./modules/addresses/addresses.module";
             : {
                 target: "pino-pretty",
                 options: {
-                  singleLine: true,
+                  singleLine: false,
                 },
               },
       },
@@ -51,6 +52,7 @@ import { AddressesModule } from "./modules/addresses/addresses.module";
     CustomerProfileModule,
     SellerProfileModule,
     AddressesModule,
+    CategoriesModule,
     SellersModule,
     CatalogModule,
     InventoryModule,
