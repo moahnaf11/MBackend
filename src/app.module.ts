@@ -21,6 +21,8 @@ import { StorageModule } from "./modules/storage/storage.module";
 import { UsersModule } from "./modules/users/users.module";
 import { AddressesModule } from "./modules/addresses/addresses.module";
 import { CategoriesModule } from "./modules/categories/categories.module";
+import { BrandsModule } from "./modules/brands/brands.module";
+import { ProductsModule } from "./modules/products/products.module";
 
 @Module({
   imports: [
@@ -53,6 +55,8 @@ import { CategoriesModule } from "./modules/categories/categories.module";
     SellerProfileModule,
     AddressesModule,
     CategoriesModule,
+    BrandsModule,
+    ProductsModule,
     SellersModule,
     CatalogModule,
     InventoryModule,
