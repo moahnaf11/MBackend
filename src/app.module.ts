@@ -1,5 +1,7 @@
 import { Module } from "@nestjs/common";
+import { BullModule } from "@nestjs/bullmq";
 import { ConfigModule } from "@nestjs/config";
+import { ConfigService } from "@nestjs/config";
 import { LoggerModule } from "nestjs-pino";
 import { appConfig } from "./config/app.config";
 import { validateEnv } from "./config/env.validation";
@@ -30,6 +32,24 @@ import { ProductsModule } from "./modules/products/products.module";
       isGlobal: true,
       load: [appConfig],
       validate: validateEnv,
+    }),
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const redisUrl = new URL(config.getOrThrow<string>("REDIS_URL"));
+        const db = redisUrl.pathname ? Number(redisUrl.pathname.slice(1)) : undefined;
+
+        return {
+          connection: {
+            host: redisUrl.hostname,
+            port: Number(redisUrl.port || 6379),
+            username: redisUrl.username || undefined,
+            password: redisUrl.password || undefined,
+            db: Number.isNaN(db) ? undefined : db,
+            tls: redisUrl.protocol === "rediss:" ? {} : undefined,
+          },
+        };
+      },
     }),
     LoggerModule.forRoot({
       pinoHttp: {

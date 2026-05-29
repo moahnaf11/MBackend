@@ -41,6 +41,7 @@ import { UpdateVariantDto } from "./dto/update-variant.dto";
 import { AuthenticatedRequest } from "../auth/types/auth.types";
 import { ConfirmProductImageDto } from "./dto/confirm-product-image.dto";
 import { CreateProductImageUploadUrlDto } from "./dto/create-product-image-upload-url.dto";
+import { ReorderProductImagesDto } from "./dto/reorder-product-images.dto";
 
 @ApiTags("products")
 @Controller("products")
@@ -356,6 +357,17 @@ export class ProductsController {
   @ApiNotFoundResponse({ description: "Image not found on this product" })
   async removeImage(@Param("id") id: string, @Param("imageId") imageId: string): Promise<void> {
     await this.productsService.removeImage(id, imageId);
+  }
+
+  @Patch(":id/images/reorder")
+  @UseGuards(JwtAuthGuard, RolesGuard, ProductOwnerGuard)
+  @Roles(UserRole.SELLER, UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Reorder product images" })
+  @ApiParam({ name: "id", description: "Product cuid" })
+  @ApiOkResponse({ description: "Images reordered" })
+  reorderImages(@Param("id") id: string, @Body() dto: ReorderProductImagesDto) {
+    return this.productsService.reorderImages(id, dto);
   }
   // ─── CATEGORY ROUTES ──────────────────────────────────────────────────────
 

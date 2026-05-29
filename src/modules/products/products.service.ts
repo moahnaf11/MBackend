@@ -19,6 +19,7 @@ import { Prisma } from "../../../generated/prisma/client";
 import { StorageService } from "../storage/storage.service";
 import { CreateProductImageUploadUrlDto } from "./dto/create-product-image-upload-url.dto";
 import { ConfirmProductImageDto } from "./dto/confirm-product-image.dto";
+import { ReorderProductImagesDto } from "./dto/reorder-product-images.dto";
 
 @Injectable()
 export class ProductsService {
@@ -548,6 +549,37 @@ export class ProductsService {
     } catch {
       // DB state wins; orphan cleanup can run later.
     }
+  }
+
+  async reorderImages(productId: string, dto: ReorderProductImagesDto) {
+    await this.findProductOrThrow(productId);
+
+    const imageIds = dto.images.map((image) => image.id);
+    const existingImages = await this.prisma.productImage.findMany({
+      where: {
+        productId,
+        id: { in: imageIds },
+      },
+      select: { id: true },
+    });
+
+    if (existingImages.length !== imageIds.length) {
+      throw new NotFoundException("One or more images were not found on this product");
+    }
+
+    await this.prisma.$transaction(
+      dto.images.map((image) =>
+        this.prisma.productImage.update({
+          where: { id: image.id },
+          data: { sortOrder: image.sortOrder },
+        }),
+      ),
+    );
+
+    return this.prisma.productImage.findMany({
+      where: { productId },
+      orderBy: { sortOrder: "asc" },
+    });
   }
 
   // ─── CATEGORIES ───────────────────────────────────────────────────────────
