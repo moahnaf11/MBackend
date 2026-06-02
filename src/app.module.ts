@@ -25,6 +25,8 @@ import { AddressesModule } from "./modules/addresses/addresses.module";
 import { CategoriesModule } from "./modules/categories/categories.module";
 import { BrandsModule } from "./modules/brands/brands.module";
 import { ProductsModule } from "./modules/products/products.module";
+import { ShipmentsModule } from "./modules/shipments/shipments.module";
+import { ReturnsModule } from "./modules/returns/returns.module";
 
 @Module({
   imports: [
@@ -83,6 +85,9 @@ import { ProductsModule } from "./modules/products/products.module";
     CartModule,
     OrdersModule,
     PaymentsModule,
+    ShipmentsModule,
+    ReturnsModule,
+    ReviewsModule,
     FulfillmentModule,
     ReviewsModule,
   ],

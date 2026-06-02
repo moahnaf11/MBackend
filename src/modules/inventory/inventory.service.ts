@@ -6,7 +6,11 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "../../../generated/prisma/client";
-import { InventoryReservationStatus, UserRole } from "../../../generated/prisma/enums";
+import {
+  InventoryReservationStatus,
+  ReturnRequestStatus,
+  UserRole,
+} from "../../../generated/prisma/enums";
 import { PrismaService } from "../../database/prisma.service";
 import type { AuthenticatedUser } from "../auth/types/auth.types";
 import { CreateWarehouseDto } from "./dto/create-warehouse.dto";
@@ -15,6 +19,15 @@ import { UpdateWarehouseDto } from "./dto/update-warehouse.dto";
 import { UpsertInventoryItemDto } from "./dto/upsert-inventory-item.dto";
 
 type InventoryTransaction = Prisma.TransactionClient;
+type ReturnRequestWithItems = Prisma.ReturnRequestGetPayload<{
+  include: {
+    items: {
+      include: {
+        orderItem: true;
+      };
+    };
+  };
+}>;
 
 @Injectable()
 export class InventoryService {
@@ -510,5 +523,110 @@ export class InventoryService {
 
   private normalizeOptionalString(value: string | undefined): string | undefined {
     return value?.trim();
+  }
+
+  async restockReturnedItems(returnRequest: ReturnRequestWithItems) {
+    await this.prisma.$transaction(async (tx) => {
+      for (const item of returnRequest.items) {
+        const reservations = await tx.inventoryReservation.findMany({
+          where: {
+            orderItemId: item.orderItemId,
+            status: InventoryReservationStatus.CONSUMED,
+          },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: {
+            id: true,
+            variantId: true,
+            warehouseId: true,
+            quantity: true,
+          },
+        });
+
+        if (reservations.length === 0) {
+          throw new ConflictException(
+            `No consumed inventory reservations found for order item ${item.orderItemId}.`,
+          );
+        }
+
+        const previouslyRefunded = await tx.returnItem.aggregate({
+          where: {
+            orderItemId: item.orderItemId,
+            returnRequestId: { not: returnRequest.id },
+            returnRequest: {
+              status: ReturnRequestStatus.REFUNDED,
+            },
+          },
+          _sum: {
+            quantity: true,
+          },
+        });
+
+        const alreadyRestockedQuantity = previouslyRefunded._sum.quantity ?? 0;
+        const totalConsumedQuantity = reservations.reduce(
+          (total, reservation) => total + reservation.quantity,
+          0,
+        );
+        const remainingConsumableQuantity = Math.max(totalConsumedQuantity - alreadyRestockedQuantity, 0);
+        let remainingToRestock = Math.min(item.quantity, remainingConsumableQuantity);
+
+        if (remainingToRestock <= 0) {
+          continue;
+        }
+
+        // Skip reservation slices already restocked by earlier refunded returns for this order item.
+        let remainingToSkip = alreadyRestockedQuantity;
+
+        for (const reservation of reservations) {
+          if (remainingToRestock <= 0) {
+            break;
+          }
+
+          if (!reservation.warehouseId) {
+            throw new ConflictException(
+              `Consumed reservation ${reservation.id} has no warehouse and cannot be restocked.`,
+            );
+          }
+
+          if (remainingToSkip >= reservation.quantity) {
+            remainingToSkip -= reservation.quantity;
+            continue;
+          }
+
+          const restockableQuantityFromReservation = reservation.quantity - remainingToSkip;
+          remainingToSkip = 0;
+          const restockQuantity = Math.min(restockableQuantityFromReservation, remainingToRestock);
+
+          const updatedInventory = await tx.inventoryItem.updateMany({
+            where: {
+              variantId: reservation.variantId,
+              warehouseId: reservation.warehouseId,
+            },
+            data: {
+              quantity: { increment: restockQuantity },
+            },
+          });
+
+          if (updatedInventory.count === 0) {
+            await tx.inventoryItem.create({
+              data: {
+                variantId: reservation.variantId,
+                warehouseId: reservation.warehouseId,
+                quantity: restockQuantity,
+                reserved: 0,
+                reorderPoint: 0,
+              },
+            });
+          }
+
+          remainingToRestock -= restockQuantity;
+        }
+
+        if (remainingToRestock > 0) {
+          throw new ConflictException(
+            `Unable to fully restock returned quantity for order item ${item.orderItemId}.`,
+          );
+        }
+      }
+    });
   }
 }
