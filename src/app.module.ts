@@ -27,6 +27,7 @@ import { BrandsModule } from "./modules/brands/brands.module";
 import { ProductsModule } from "./modules/products/products.module";
 import { ShipmentsModule } from "./modules/shipments/shipments.module";
 import { ReturnsModule } from "./modules/returns/returns.module";
+import { PromotionsModule } from "./modules/promotions/promotions.module";
 
 @Module({
   imports: [
@@ -88,8 +89,8 @@ import { ReturnsModule } from "./modules/returns/returns.module";
     ShipmentsModule,
     ReturnsModule,
     ReviewsModule,
+    PromotionsModule,
     FulfillmentModule,
-    ReviewsModule,
   ],
 })
 export class AppModule {}

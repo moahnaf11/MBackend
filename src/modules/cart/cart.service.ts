@@ -7,6 +7,7 @@ import { CartStatus, InventoryReservationStatus, ProductStatus } from "../../../
 import { Prisma } from "../../../generated/prisma/client";
 import { PrismaService } from "../../database/prisma.service";
 import { InventoryService } from "../inventory/inventory.service";
+import { PromotionsService } from "../promotions/promotions.service";
 import { AddCartItemDto } from "./dto/add-cart-item.dto";
 import { ApplyCartCouponDto } from "./dto/apply-cart-coupon.dto";
 import { UpdateCartItemDto } from "./dto/update-cart-item.dto";
@@ -70,6 +71,7 @@ export class CartService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly promotionsService: PromotionsService,
   ) {}
 
   async findMine(userId: string) {
@@ -191,6 +193,7 @@ export class CartService {
     const couponCode = dto.couponCode.trim().toUpperCase();
 
     const cart = await this.findOrCreateActiveCart(userId);
+    await this.promotionsService.validateCouponForCart(userId, cart.id, couponCode);
 
     await this.prisma.cart.update({
       where: { id: cart.id },

@@ -16,6 +16,7 @@ import {
 import { Prisma } from "../../../generated/prisma/client";
 import { PrismaService } from "../../database/prisma.service";
 import { InventoryService } from "../inventory/inventory.service";
+import { PromotionsService } from "../promotions/promotions.service";
 import { CreateOrderFromCartDto } from "./dto/create-order-from-cart.dto";
 import { ListOrdersDto } from "./dto/list-orders.dto";
 import { UpdateOrderStatusDto } from "./dto/update-order-status.dto";
@@ -93,6 +94,7 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly promotionsService: PromotionsService,
   ) {}
 
   async createFromCart(userId: string, dto: CreateOrderFromCartDto) {
@@ -115,6 +117,7 @@ export class OrdersService {
                         title: true,
                         status: true,
                         sellerId: true,
+                        categories: { select: { categoryId: true } },
                       },
                     },
                   },
@@ -155,7 +158,12 @@ export class OrdersService {
         );
         const shippingAmount = new Prisma.Decimal(0);
         const taxAmount = new Prisma.Decimal(0);
-        const discountAmount = new Prisma.Decimal(0);
+        const discount = await this.promotionsService.calculateCartDiscount(tx, {
+          userId,
+          cart,
+          shippingAmount,
+        });
+        const discountAmount = discount.discountAmount;
         const totalAmount = subtotalAmount.plus(shippingAmount).plus(taxAmount).minus(discountAmount);
 
         const order = await tx.order.create({
@@ -179,6 +187,13 @@ export class OrdersService {
             },
           },
           select: { id: true },
+        });
+
+        await this.promotionsService.createOrderRedemption(tx, {
+          discount,
+          userId,
+          cartId: cart.id,
+          orderId: order.id,
         });
 
         for (const item of cart.items) {
