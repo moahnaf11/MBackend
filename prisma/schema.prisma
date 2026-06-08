@@ -91,6 +91,7 @@ enum PaymentStatus {
   FAILED
   CANCELLED
   REFUNDED
+  PARTIALLY_REFUNDED
 }
 
 enum ShipmentStatus {
@@ -1099,6 +1100,8 @@ model ReturnItem {
 model Refund {
   id               String       @id @default(cuid())
   orderId          String
+  orderItemId      String?
+  refundedQuantity Int?
   returnRequestId  String?
   paymentAttemptId String?
   status           RefundStatus @default(PENDING)

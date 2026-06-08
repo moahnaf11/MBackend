@@ -22,6 +22,8 @@ import {
 import { Prisma } from "../../../generated/prisma/client";
 import { CreateRefundDto } from "./dto/create-refund.dto";
 import { StripeCharge, StripeClient, StripeEvent, StripePaymentIntent } from "./stripe.types";
+import { SellerFinanceService } from "../seller-finance/seller-finance.service";
+import { InventoryService } from "../inventory/inventory.service";
 
 @Injectable()
 export class PaymentsService {
@@ -33,6 +35,8 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly ordersService: OrdersService,
     private readonly config: ConfigService,
+    private readonly sellerFinanceService: SellerFinanceService,
+    private readonly inventoryService: InventoryService,
   ) {
     this.stripe = new Stripe(this.config.getOrThrow<string>("STRIPE_SECRET_KEY"));
   }
@@ -266,7 +270,6 @@ export class PaymentsService {
   }
 
   private async handleChargeRefunded(charge: StripeCharge): Promise<void> {
-    // charge.payment_intent is the PaymentIntent id.
     const paymentIntentId =
       typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id;
 
@@ -282,31 +285,134 @@ export class PaymentsService {
       return;
     }
 
-    // Find the most recent refund on Stripe's charge that isn't yet in our DB.
     for (const stripeRefund of charge.refunds?.data ?? []) {
-      const existingRefund = await this.prisma.refund.findFirst({
+      // Find ALL Refund rows for this Stripe refund ID
+      // Admin refunds: one row (full order) or one row (single item)
+      // Customer returns: one row per return item, all sharing same providerRefundId
+      const refundRows = await this.prisma.refund.findMany({
         where: { providerRefundId: stripeRefund.id },
-        select: { id: true },
       });
 
-      if (existingRefund) {
-        continue; // already recorded
+      if (refundRows.length === 0) {
+        this.logger.warn(`Refund ${stripeRefund.id} has no matching Refund rows — skipping.`);
+        continue;
       }
 
-      await this.prisma.refund.create({
-        data: {
-          orderId: attempt.orderId,
-          paymentAttemptId: attempt.id,
-          status: RefundStatus.SUCCEEDED,
-          amount: new Prisma.Decimal(stripeRefund.amount).div(100), // cents → dollars
-          currency: stripeRefund.currency.toUpperCase(),
-          providerRefundId: stripeRefund.id,
-          reason: stripeRefund.reason ?? null,
-          processedAt: new Date(stripeRefund.created * 1000),
-        },
-      });
+      // Process each row in its own transaction so one failure doesn't
+      // block the others (partial success is better than total rollback here)
+      for (const refund of refundRows) {
+        // Idempotency — skip rows already processed
+        if (refund.status === RefundStatus.SUCCEEDED) continue;
 
-      this.logger.log(`Refund ${stripeRefund.id} recorded for order ${attempt.orderId}.`);
+        await this.prisma.$transaction(async (tx) => {
+          // ── 1. Mark this Refund row as SUCCEEDED ──────────────────────────
+          await tx.refund.update({
+            where: { id: refund.id },
+            data: {
+              status: RefundStatus.SUCCEEDED,
+              processedAt: new Date(stripeRefund.created * 1000),
+            },
+          });
+
+          // ── 2. Write seller ledger entries ─────────────────────────────────
+          // Both admin and customer return refunds now have orderItemId set,
+          // so this always takes the item-level path
+          if (refund.orderItemId && refund.refundedQuantity) {
+            await this.sellerFinanceService.createRefundLedgerEntryForItem(
+              tx,
+              refund.orderItemId,
+              refund.refundedQuantity,
+            );
+          } else {
+            // Fallback for legacy refunds created before this change
+            await this.sellerFinanceService.createRefundLedgerEntriesForOrder(tx, refund.orderId);
+          }
+
+          // ── 3. Restock inventory ────────────────────────────────────────────
+          if (refund.orderItemId && refund.refundedQuantity) {
+            await this.inventoryService.restockOrderItem(
+              tx,
+              refund.orderItemId,
+              refund.refundedQuantity,
+            );
+          } else {
+            // Fallback for legacy refunds
+            await this.inventoryService.restockOrderItems(tx, refund.orderId);
+          }
+
+          // ── 4. Update PaymentAttempt status ─────────────────────────────────
+          // Only update after ALL rows for this Stripe refund are processed.
+          // Check if this is the last row being processed for this providerRefundId.
+          if (refund.paymentAttemptId) {
+            const remainingProcessing = await tx.refund.count({
+              where: {
+                providerRefundId: stripeRefund.id,
+                status: { not: RefundStatus.SUCCEEDED },
+                id: { not: refund.id }, // exclude the one we just updated
+              },
+            });
+
+            if (remainingProcessing === 0) {
+              // All rows for this Stripe refund are now SUCCEEDED —
+              // check if the full payment amount has been refunded
+              const totalRefunded = await tx.refund.aggregate({
+                where: {
+                  paymentAttemptId: refund.paymentAttemptId,
+                  status: RefundStatus.SUCCEEDED,
+                },
+                _sum: { amount: true },
+              });
+
+              const refundedTotal = new Prisma.Decimal(totalRefunded._sum.amount ?? 0);
+              const paymentAttempt = await tx.paymentAttempt.findUnique({
+                where: { id: refund.paymentAttemptId },
+                select: { amount: true },
+              });
+
+              if (paymentAttempt) {
+                const isFullyRefunded = refundedTotal.gte(paymentAttempt.amount);
+                await tx.paymentAttempt.update({
+                  where: { id: refund.paymentAttemptId },
+                  data: {
+                    status: isFullyRefunded
+                      ? PaymentStatus.REFUNDED
+                      : PaymentStatus.PARTIALLY_REFUNDED,
+                  },
+                });
+                // ── NEW: Also update order status when fully refunded ──────────────
+                if (isFullyRefunded) {
+                  const order = await tx.order.findUnique({
+                    where: { id: refund.orderId },
+                    select: { status: true },
+                  });
+
+                  // Only update if not already REFUNDED (idempotency)
+                  if (order && order.status !== OrderStatus.REFUNDED) {
+                    await tx.order.update({
+                      where: { id: refund.orderId },
+                      data: { status: OrderStatus.REFUNDED },
+                    });
+
+                    await tx.orderStatusEvent.create({
+                      data: {
+                        orderId: refund.orderId,
+                        toStatus: OrderStatus.REFUNDED,
+                        fromStatus: order.status,
+                        note: `All payments refunded. Stripe refund: ${stripeRefund.id}`,
+                      },
+                    });
+                  }
+                }
+              }
+            }
+          }
+        });
+
+        this.logger.log(
+          `Refund row ${refund.id} (Stripe: ${stripeRefund.id}) succeeded` +
+            (refund.orderItemId ? ` — item ${refund.orderItemId}` : " — full order"),
+        );
+      }
     }
   }
 
@@ -322,7 +428,11 @@ export class PaymentsService {
   async createRefund(orderId: string, dto: CreateRefundDto) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { id: true, currency: true, status: true },
+      select: {
+        id: true,
+        currency: true,
+        status: true,
+      },
     });
 
     if (!order) {
@@ -335,7 +445,11 @@ export class PaymentsService {
         orderId,
         status: PaymentStatus.CAPTURED,
       },
-      select: { id: true, providerPaymentId: true, amount: true },
+      select: {
+        id: true,
+        providerPaymentId: true,
+        amount: true,
+      },
     });
 
     if (!attempt) {
@@ -346,55 +460,93 @@ export class PaymentsService {
       throw new BadRequestException("Payment attempt has no provider payment id.");
     }
 
-    // Validate requested amount doesn't exceed captured amount.
-    const refundAmount = new Prisma.Decimal(dto.amount);
-    if (refundAmount.greaterThan(attempt.amount)) {
-      throw new BadRequestException(
-        `Refund amount (${dto.amount}) exceeds captured amount (${attempt.amount}).`,
-      );
+    // ─────────────────────────────────────────────
+    // ITEM VALIDATION
+    // ─────────────────────────────────────────────
+
+    let refundedQuantity: number | null = null;
+
+    if (dto.orderItemId) {
+      const orderItem = await this.prisma.orderItem.findFirst({
+        where: { id: dto.orderItemId, orderId },
+        select: { quantity: true }, // ← only quantity needed
+      });
+
+      if (!orderItem) {
+        throw new NotFoundException("Order item not found on this order.");
+      }
+
+      refundedQuantity = dto.quantity ?? orderItem.quantity;
+
+      if (refundedQuantity > orderItem.quantity) {
+        throw new BadRequestException(
+          `Cannot refund ${refundedQuantity} units — order item only has ${orderItem.quantity}.`,
+        );
+      }
     }
 
-    // Fetch existing refunds to check we're not over-refunding.
+    // ─────────────────────────────────────────────
+    // OVER-REFUND GUARD
+    // ─────────────────────────────────────────────
+
     const existingRefundsTotal = await this.prisma.refund.aggregate({
       where: {
         paymentAttemptId: attempt.id,
-        status: { in: [RefundStatus.PROCESSING, RefundStatus.SUCCEEDED] },
+        status: {
+          in: [RefundStatus.PROCESSING, RefundStatus.SUCCEEDED],
+        },
       },
-      _sum: { amount: true },
+      _sum: {
+        amount: true,
+      },
     });
 
     const alreadyRefunded = new Prisma.Decimal(existingRefundsTotal._sum.amount ?? 0);
+
     const maxRefundable = new Prisma.Decimal(attempt.amount).minus(alreadyRefunded);
+
+    const refundAmount = new Prisma.Decimal(dto.amount);
 
     if (refundAmount.greaterThan(maxRefundable)) {
       throw new BadRequestException(
-        `Refund amount exceeds refundable balance. Already refunded: ${alreadyRefunded}. Remaining: ${maxRefundable}.`,
+        `Refund exceeds remaining balance. Already refunded: ${alreadyRefunded}. Remaining: ${maxRefundable}.`,
       );
     }
 
-    // ── Issue refund via Stripe ────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // STRIPE REFUND
+    // ─────────────────────────────────────────────
+
     const amountInCents = refundAmount.mul(100).toDecimalPlaces(0).toNumber();
 
     const stripeRefund = await this.stripe.refunds.create({
       payment_intent: attempt.providerPaymentId,
       amount: amountInCents,
-      ...(dto.reason && { reason: "requested_by_customer" }),
     });
 
-    // ── Persist Refund row ─────────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // STORE REFUND CONTEXT
+    // THIS IS WHAT THE WEBHOOK WILL USE
+    // ─────────────────────────────────────────────
+
     const refund = await this.prisma.refund.create({
       data: {
         orderId,
         paymentAttemptId: attempt.id,
+
+        orderItemId: dto.orderItemId ?? null,
+        refundedQuantity,
+
         status: RefundStatus.PROCESSING,
+
         amount: refundAmount,
         currency: order.currency,
+
         providerRefundId: stripeRefund.id,
         reason: dto.reason ?? null,
       },
     });
 
-    // The Refund transitions to SUCCEEDED when Stripe fires charge.refunded.
     return refund;
   }
 
@@ -462,14 +614,13 @@ export class PaymentsService {
       throw new BadRequestException("Return not eligible for refund yet.");
     }
 
-    // prevent duplicate refund
+    // Idempotency — if a refund already exists for this return, return it
     const existingRefund = await this.prisma.refund.findFirst({
       where: {
         returnRequestId,
         status: { in: [RefundStatus.PROCESSING, RefundStatus.SUCCEEDED] },
       },
     });
-
     if (existingRefund) return existingRefund;
 
     const attempt = await this.prisma.paymentAttempt.findFirst({
@@ -484,10 +635,12 @@ export class PaymentsService {
       throw new BadRequestException("No captured payment found for refund.");
     }
 
+    // Calculate total refund amount from the returned items
     const refundAmount = returnRequest.items.reduce((sum, item) => {
       return sum.plus(new Prisma.Decimal(item.orderItem.unitPrice).mul(item.quantity));
     }, new Prisma.Decimal(0));
 
+    // Over-refund guard
     const existingRefunds = await this.prisma.refund.aggregate({
       where: {
         paymentAttemptId: attempt.id,
@@ -501,28 +654,44 @@ export class PaymentsService {
 
     if (refundAmount.greaterThan(maxRefundable)) {
       throw new BadRequestException(
-        `Refund exceeds remaining balance. Remaining: ${maxRefundable}`,
+        `Refund exceeds remaining balance. Remaining: ${maxRefundable.toFixed(2)}`,
       );
     }
 
+    // Create the Stripe refund for the total amount
     const stripeRefund = await this.stripe.refunds.create({
       payment_intent: attempt.providerPaymentId,
       amount: refundAmount.mul(100).toDecimalPlaces(0).toNumber(),
     });
 
-    const refund = await this.prisma.refund.create({
-      data: {
-        orderId: returnRequest.orderId,
-        returnRequestId,
-        paymentAttemptId: attempt.id,
-        status: RefundStatus.PROCESSING,
-        amount: refundAmount,
-        currency: returnRequest.order.currency,
-        providerRefundId: stripeRefund.id,
-        reason: "return_request",
-      },
-    });
+    // ─── KEY CHANGE ──────────────────────────────────────────────────────────
+    // Create ONE Refund row per return item, each with orderItemId and
+    // refundedQuantity. This tells the webhook exactly which item to restock
+    // and which ledger entry to write — same as the admin item-level flow.
+    //
+    // All rows share the same providerRefundId so the webhook can find them
+    // all when the charge.refunded event fires.
+    // ─────────────────────────────────────────────────────────────────────────
+    const refunds = await this.prisma.$transaction(
+      returnRequest.items.map((item) =>
+        this.prisma.refund.create({
+          data: {
+            orderId: returnRequest.orderId,
+            returnRequestId,
+            paymentAttemptId: attempt.id,
+            orderItemId: item.orderItemId, // ← per-item
+            refundedQuantity: item.quantity, // ← per-item
+            status: RefundStatus.PROCESSING,
+            amount: new Prisma.Decimal(item.orderItem.unitPrice).mul(item.quantity),
+            currency: returnRequest.order.currency,
+            providerRefundId: stripeRefund.id, // same Stripe refund ID for all
+            reason: "return_request",
+          },
+        }),
+      ),
+    );
 
-    return refund;
+    // Return the first row — callers only check existence, not the full list
+    return refunds[0];
   }
 }

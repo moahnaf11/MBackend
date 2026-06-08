@@ -241,6 +241,12 @@ export class ReturnsService {
     return updated;
   }
 
+  // Remove the restockReturnedItems call entirely — restocking now happens
+  // in the webhook after Stripe confirms, same as the admin flow.
+  //
+  // Replace the entire markAsRefunded method with this:
+  // ═══════════════════════════════════════════════════════════════════════════
+
   private async markAsRefunded(id: string, resolutionNote?: string) {
     const request = await this.prisma.returnRequest.findUnique({
       where: { id },
@@ -262,12 +268,13 @@ export class ReturnsService {
       throw new BadRequestException(`Invalid transition from ${request.status} to REFUNDED`);
     }
 
-    // External side effect first; provider/idempotency guards prevent duplicate charges.
+    // Fire the Stripe refund + create Refund rows (PROCESSING)
+    // Idempotency guard inside processReturnRefund prevents duplicate charges
     await this.paymentsService.processReturnRefund(id);
 
-    await this.inventoryService.restockReturnedItems(request);
-
-    await this.prisma.returnRequest.update({
+    // Update the return request to REFUNDED
+    // Inventory restock and ledger entries happen in the webhook — NOT here
+    const updated = await this.prisma.returnRequest.update({
       where: { id },
       data: {
         status: ReturnRequestStatus.REFUNDED,
@@ -275,14 +282,6 @@ export class ReturnsService {
         closedAt: new Date(),
       },
     });
-
-    const updated = await this.prisma.returnRequest.findUnique({
-      where: { id },
-    });
-
-    if (!updated) {
-      throw new NotFoundException("Return request not found.");
-    }
 
     return updated;
   }

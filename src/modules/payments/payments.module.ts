@@ -4,6 +4,8 @@ import { PaymentsService } from "./payments.service";
 
 import { OrdersModule } from "../orders/orders.module";
 import { StripeWebhookGuard } from "./guards/stripe-webhook.guard";
+import { SellerFinanceModule } from "../seller-finance/seller-finance.module";
+import { InventoryModule } from "../inventory/inventory.module";
 
 /**
  * IMPORTANT — Raw body middleware for webhook signature verification.
@@ -29,7 +31,7 @@ import { StripeWebhookGuard } from "./guards/stripe-webhook.guard";
  * StripeWebhookGuard reads req.rawBody directly.
  */
 @Module({
-  imports: [OrdersModule],
+  imports: [OrdersModule, SellerFinanceModule, InventoryModule],
   controllers: [PaymentsController],
   providers: [PaymentsService, StripeWebhookGuard],
   exports: [PaymentsService, PaymentsModule],

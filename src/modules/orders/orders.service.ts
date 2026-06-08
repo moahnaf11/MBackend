@@ -20,6 +20,7 @@ import { PromotionsService } from "../promotions/promotions.service";
 import { CreateOrderFromCartDto } from "./dto/create-order-from-cart.dto";
 import { ListOrdersDto } from "./dto/list-orders.dto";
 import { UpdateOrderStatusDto } from "./dto/update-order-status.dto";
+import { SellerFinanceService } from "../seller-finance/seller-finance.service";
 
 const orderInclude = {
   items: {
@@ -90,11 +91,13 @@ const ORDER_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 @Injectable()
 export class OrdersService {
   private readonly marketplaceCommissionRate = new Prisma.Decimal("0.10");
+  private readonly payoutHoldDays = 14;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
     private readonly promotionsService: PromotionsService,
+    private readonly sellerFinanceService: SellerFinanceService,
   ) {}
 
   async createFromCart(userId: string, dto: CreateOrderFromCartDto) {
@@ -164,7 +167,10 @@ export class OrdersService {
           shippingAmount,
         });
         const discountAmount = discount.discountAmount;
-        const totalAmount = subtotalAmount.plus(shippingAmount).plus(taxAmount).minus(discountAmount);
+        const totalAmount = subtotalAmount
+          .plus(shippingAmount)
+          .plus(taxAmount)
+          .minus(discountAmount);
 
         const order = await tx.order.create({
           data: {
@@ -530,6 +536,7 @@ export class OrdersService {
             amount: item.totalAmount,
             currency: item.order.currency,
             description: "Order item sale.",
+            availableAt: new Date(Date.now() + this.payoutHoldDays * 24 * 60 * 60 * 1000), // 14 day hold
           },
           {
             sellerId: item.sellerId,
@@ -538,6 +545,7 @@ export class OrdersService {
             amount: item.commissionAmount.negated(),
             currency: item.order.currency,
             description: "Marketplace commission.",
+            availableAt: new Date(Date.now() + this.payoutHoldDays * 24 * 60 * 60 * 1000), // 14 day hold
           },
         ],
       });

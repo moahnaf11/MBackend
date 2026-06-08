@@ -3,11 +3,13 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "../../../generated/prisma/client";
 import {
   InventoryReservationStatus,
+  RefundStatus,
   ReturnRequestStatus,
   UserRole,
 } from "../../../generated/prisma/enums";
@@ -32,6 +34,7 @@ type ReturnRequestWithItems = Prisma.ReturnRequestGetPayload<{
 @Injectable()
 export class InventoryService {
   private readonly cartReservationTtlMinutes = 30;
+  private readonly logger = new Logger(InventoryService.name);
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -525,6 +528,7 @@ export class InventoryService {
     return value?.trim();
   }
 
+  // not used currently
   async restockReturnedItems(returnRequest: ReturnRequestWithItems) {
     await this.prisma.$transaction(async (tx) => {
       for (const item of returnRequest.items) {
@@ -566,7 +570,10 @@ export class InventoryService {
           (total, reservation) => total + reservation.quantity,
           0,
         );
-        const remainingConsumableQuantity = Math.max(totalConsumedQuantity - alreadyRestockedQuantity, 0);
+        const remainingConsumableQuantity = Math.max(
+          totalConsumedQuantity - alreadyRestockedQuantity,
+          0,
+        );
         let remainingToRestock = Math.min(item.quantity, remainingConsumableQuantity);
 
         if (remainingToRestock <= 0) {
@@ -628,5 +635,152 @@ export class InventoryService {
         }
       }
     });
+  }
+
+  /**
+   * Restock a single order item after an admin-initiated item-level refund.
+   *
+   * Uses the CONSUMED inventory reservations to identify the correct warehouse(s)
+   * and quantities — same approach as restockReturnedItems() in the returns flow.
+   *
+   * @param tx         - Prisma transaction client (called inside webhook transaction)
+   * @param orderItemId - The order item being refunded
+   * @param quantity    - How many units are being refunded (may be less than full qty)
+   */
+  async restockOrderItem(
+    tx: Prisma.TransactionClient,
+    orderItemId: string,
+    quantity: number,
+  ): Promise<void> {
+    // Find the CONSUMED reservations for this order item.
+    // These were written at checkout and record exactly which warehouse(s)
+    // the stock came from and how many units per warehouse.
+    const reservations = await tx.inventoryReservation.findMany({
+      where: {
+        orderItemId,
+        status: InventoryReservationStatus.CONSUMED,
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        variantId: true,
+        warehouseId: true,
+        quantity: true,
+      },
+    });
+
+    if (reservations.length === 0) {
+      // No consumed reservations — stock was never tracked for this item.
+      // This can happen if the item was created before inventory tracking was added.
+      // Log and skip rather than throwing — the refund itself should still succeed.
+      this.logger.warn(
+        `No consumed reservations found for order item ${orderItemId} — skipping restock.`,
+      );
+      return;
+    }
+
+    // Account for any quantity already restocked by a previous partial admin refund
+    // on this same order item (e.g. admin refunded 1 unit earlier, now refunding 2 more).
+    const previousAdminRefunds = await tx.refund.aggregate({
+      where: {
+        orderItemId,
+        status: { in: [RefundStatus.SUCCEEDED] },
+      },
+      _sum: { refundedQuantity: true },
+    });
+
+    const alreadyRestockedQuantity = previousAdminRefunds._sum.refundedQuantity ?? 0;
+
+    const totalConsumedQuantity = reservations.reduce((total, r) => total + r.quantity, 0);
+
+    const remainingConsumableQuantity = Math.max(
+      totalConsumedQuantity - alreadyRestockedQuantity,
+      0,
+    );
+
+    let remainingToRestock = Math.min(quantity, remainingConsumableQuantity);
+
+    if (remainingToRestock <= 0) {
+      this.logger.warn(
+        `Order item ${orderItemId} has no remaining quantity to restock — already fully restocked.`,
+      );
+      return;
+    }
+
+    // Walk through reservations in order, skipping any slices already restocked,
+    // then restocking the remaining quantity back to the correct warehouses.
+    let remainingToSkip = alreadyRestockedQuantity;
+
+    for (const reservation of reservations) {
+      if (remainingToRestock <= 0) break;
+
+      if (!reservation.warehouseId) {
+        // Reservation has no warehouse — can't restock. Log and continue.
+        this.logger.warn(
+          `Consumed reservation ${reservation.id} has no warehouseId — skipping slice.`,
+        );
+        continue;
+      }
+
+      // Skip slices already covered by previous refunds
+      if (remainingToSkip >= reservation.quantity) {
+        remainingToSkip -= reservation.quantity;
+        continue;
+      }
+
+      const restockableFromThisReservation = reservation.quantity - remainingToSkip;
+      remainingToSkip = 0;
+      const restockQuantity = Math.min(restockableFromThisReservation, remainingToRestock);
+
+      // Restock to the exact warehouse this stock came from
+      const updated = await tx.inventoryItem.updateMany({
+        where: {
+          variantId: reservation.variantId,
+          warehouseId: reservation.warehouseId,
+        },
+        data: { quantity: { increment: restockQuantity } },
+      });
+
+      // If for some reason the inventory row doesn't exist, create it
+      if (updated.count === 0) {
+        await tx.inventoryItem.create({
+          data: {
+            variantId: reservation.variantId,
+            warehouseId: reservation.warehouseId,
+            quantity: restockQuantity,
+            reserved: 0,
+            reorderPoint: 0,
+          },
+        });
+      }
+
+      remainingToRestock -= restockQuantity;
+    }
+
+    if (remainingToRestock > 0) {
+      // Partial restock — log but don't throw. The refund itself succeeded;
+      // a manual stock adjustment can fix the remainder.
+      this.logger.warn(
+        `Could not fully restock order item ${orderItemId} — ${remainingToRestock} units unaccounted for. Manual stock adjustment may be needed.`,
+      );
+    }
+  }
+
+  /**
+   * Restock ALL items on an order after a full-order admin refund.
+   * Calls restockOrderItem for each item using that item's full quantity.
+   *
+   * @param tx      - Prisma transaction client
+   * @param orderId - The order being fully refunded
+   */
+  async restockOrderItems(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
+    const orderItems = await tx.orderItem.findMany({
+      where: { orderId },
+      select: { id: true, quantity: true },
+    });
+
+    for (const item of orderItems) {
+      await this.restockOrderItem(tx, item.id, item.quantity);
+    }
   }
 }
