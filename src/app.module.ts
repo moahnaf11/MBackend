@@ -29,6 +29,7 @@ import { ShipmentsModule } from "./modules/shipments/shipments.module";
 import { ReturnsModule } from "./modules/returns/returns.module";
 import { PromotionsModule } from "./modules/promotions/promotions.module";
 import { SellerFinanceModule } from "./modules/seller-finance/seller-finance.module";
+import { WishlistModule } from "./modules/wishlist/wishlist.module";
 
 @Module({
   imports: [
@@ -92,6 +93,7 @@ import { SellerFinanceModule } from "./modules/seller-finance/seller-finance.mod
     ReviewsModule,
     PromotionsModule,
     SellerFinanceModule,
+    WishlistModule,
     FulfillmentModule,
   ],
 })
