@@ -30,6 +30,7 @@ import { ReturnsModule } from "./modules/returns/returns.module";
 import { PromotionsModule } from "./modules/promotions/promotions.module";
 import { SellerFinanceModule } from "./modules/seller-finance/seller-finance.module";
 import { WishlistModule } from "./modules/wishlist/wishlist.module";
+import { ProductQaModule } from "./modules/productQnA/productqa.module";
 
 @Module({
   imports: [
@@ -94,6 +95,7 @@ import { WishlistModule } from "./modules/wishlist/wishlist.module";
     PromotionsModule,
     SellerFinanceModule,
     WishlistModule,
+    ProductQaModule,
     FulfillmentModule,
   ],
 })
