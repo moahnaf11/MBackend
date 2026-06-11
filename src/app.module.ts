@@ -32,6 +32,7 @@ import { SellerFinanceModule } from "./modules/seller-finance/seller-finance.mod
 import { WishlistModule } from "./modules/wishlist/wishlist.module";
 import { ProductQaModule } from "./modules/productQnA/productqa.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
+import { FraudFlagsModule } from "./modules/fraud-flags/fraud-flags.module";
 
 @Module({
   imports: [
@@ -98,6 +99,7 @@ import { NotificationsModule } from "./modules/notifications/notifications.modul
     WishlistModule,
     ProductQaModule,
     NotificationsModule,
+    FraudFlagsModule,
     FulfillmentModule,
   ],
 })
