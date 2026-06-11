@@ -24,6 +24,8 @@ import { CreateRefundDto } from "./dto/create-refund.dto";
 import { StripeCharge, StripeClient, StripeEvent, StripePaymentIntent } from "./stripe.types";
 import { SellerFinanceService } from "../seller-finance/seller-finance.service";
 import { InventoryService } from "../inventory/inventory.service";
+import { OutboxService } from "../../common/outbox/outbox.service";
+import { NotificationEvents } from "../notifications/constants/notification-events";
 
 @Injectable()
 export class PaymentsService {
@@ -37,6 +39,7 @@ export class PaymentsService {
     private readonly config: ConfigService,
     private readonly sellerFinanceService: SellerFinanceService,
     private readonly inventoryService: InventoryService,
+    private readonly outboxService: OutboxService,
   ) {
     this.stripe = new Stripe(this.config.getOrThrow<string>("STRIPE_SECRET_KEY"));
   }
@@ -407,6 +410,27 @@ export class PaymentsService {
             }
           }
         });
+        // Emit notification after transaction commits — outside so a notification
+        // failure never rolls back the refund processing
+        const order = await this.prisma.order.findUnique({
+          where: { id: refund.orderId },
+          select: { userId: true, orderNumber: true, currency: true },
+        });
+
+        if (order?.userId) {
+          await this.outboxService.emit(
+            NotificationEvents.REFUND_SUCCEEDED,
+            {
+              userId: order.userId,
+              orderId: refund.orderId,
+              orderNumber: order.orderNumber,
+              amount: new Prisma.Decimal(stripeRefund.amount).div(100).toString(),
+              currency: order.currency,
+            },
+            refund.orderId,
+            "Order",
+          );
+        }
 
         this.logger.log(
           `Refund row ${refund.id} (Stripe: ${stripeRefund.id}) succeeded` +

@@ -21,6 +21,8 @@ import { CreateOrderFromCartDto } from "./dto/create-order-from-cart.dto";
 import { ListOrdersDto } from "./dto/list-orders.dto";
 import { UpdateOrderStatusDto } from "./dto/update-order-status.dto";
 import { SellerFinanceService } from "../seller-finance/seller-finance.service";
+import { OutboxService } from "../../common/outbox/outbox.service";
+import { NotificationEvents } from "../notifications/constants/notification-events";
 
 const orderInclude = {
   items: {
@@ -98,6 +100,7 @@ export class OrdersService {
     private readonly inventoryService: InventoryService,
     private readonly promotionsService: PromotionsService,
     private readonly sellerFinanceService: SellerFinanceService,
+    private readonly outboxService: OutboxService,
   ) {}
 
   async createFromCart(userId: string, dto: CreateOrderFromCartDto) {
@@ -245,7 +248,23 @@ export class OrdersService {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
 
-    return this.findMineById(userId, orderId);
+    // AFTER
+    const order = await this.findMineById(userId, orderId);
+
+    await this.outboxService.emit(
+      NotificationEvents.ORDER_PLACED,
+      {
+        userId,
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        totalAmount: order.totalAmount.toString(),
+        currency: order.currency,
+      },
+      order.id,
+      "Order",
+    );
+
+    return order;
   }
 
   async findMine(userId: string, query: ListOrdersDto) {
@@ -299,7 +318,21 @@ export class OrdersService {
       });
     });
 
-    return this.findMineById(userId, id);
+    const order = await this.findMineById(userId, id);
+
+    await this.outboxService.emit(
+      NotificationEvents.ORDER_CANCELLED,
+      {
+        userId,
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        reason: "Cancelled by customer.",
+      },
+      order.id,
+      "Order",
+    );
+
+    return order;
   }
 
   async findSellerOrders(userId: string, query: ListOrdersDto) {
@@ -416,7 +449,69 @@ export class OrdersService {
       }
     });
 
-    return this.findById(id);
+    const order = await this.findById(id);
+
+    if (order.userId) {
+      if (dto.status === OrderStatus.PAID) {
+        await this.outboxService.emit(
+          NotificationEvents.ORDER_PAID,
+          {
+            userId: order.userId,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            totalAmount: order.totalAmount.toString(),
+            currency: order.currency,
+          },
+          order.id,
+          "Order",
+        );
+      }
+
+      if (dto.status === OrderStatus.SHIPPED) {
+        const shipment = order.shipments?.[0];
+        await this.outboxService.emit(
+          NotificationEvents.ORDER_SHIPPED,
+          {
+            userId: order.userId,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            carrier: shipment?.carrier ?? undefined,
+            trackingNumber: shipment?.trackingNumber ?? undefined,
+          },
+          order.id,
+          "Order",
+        );
+      }
+
+      if (dto.status === OrderStatus.DELIVERED) {
+        await this.outboxService.emit(
+          NotificationEvents.ORDER_DELIVERED,
+          {
+            userId: order.userId,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+          },
+          order.id,
+          "Order",
+        );
+      }
+
+      if (dto.status === OrderStatus.CANCELLED) {
+        await this.outboxService.emit(
+          NotificationEvents.ORDER_CANCELLED,
+          {
+            userId: order.userId,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            reason: dto.note ?? undefined,
+          },
+          order.id,
+          "Order",
+        );
+      }
+    }
+
+    return order;
   }
 
   private async findMany(query: ListOrdersDto) {

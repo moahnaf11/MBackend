@@ -16,6 +16,8 @@ import { CreateSellerDocumentUploadUrlDto } from "./dto/create-seller-document-u
 import { CreateSellerLogoUploadUrlDto } from "./dto/create-seller-logo-upload-url.dto";
 import { UpdateSellerProfileDto } from "./dto/update-seller-profile.dto";
 import { UpdateSellerStatusDto } from "./dto/update-seller-status.dto";
+import { OutboxService } from "../../common/outbox/outbox.service";
+import { NotificationEvents } from "../notifications/constants/notification-events";
 
 const SELLER_PROFILE_SELECT = {
   id: true,
@@ -89,6 +91,7 @@ export class SellerProfileService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly outboxService: OutboxService,
   ) {}
 
   async apply(userId: string, dto: ApplySellerDto): Promise<SellerProfileResponse> {
@@ -395,7 +398,7 @@ export class SellerProfileService {
   ): Promise<SellerProfileResponse> {
     const profile = await this.findById(id);
 
-    return this.prisma.$transaction(async (tx) => {
+    const updatedProfile = await this.prisma.$transaction(async (tx) => {
       await tx.sellerProfile.update({
         where: { id },
         data: {
@@ -443,6 +446,36 @@ export class SellerProfileService {
 
       return updatedProfile;
     });
+
+    // Emit after transaction commits — non-fatal if notification fails
+    if (dto.status === SellerStatus.ACTIVE) {
+      await this.outboxService.emit(
+        NotificationEvents.SELLER_APPROVED,
+        {
+          userId: profile.userId,
+          sellerId: id,
+          storeName: profile.storeName,
+        },
+        id,
+        "SellerProfile",
+      );
+    }
+
+    if (dto.status === SellerStatus.REJECTED) {
+      await this.outboxService.emit(
+        NotificationEvents.SELLER_REJECTED,
+        {
+          userId: profile.userId,
+          sellerId: id,
+          storeName: profile.storeName,
+          reason: dto.reason ?? undefined,
+        },
+        id,
+        "SellerProfile",
+      );
+    }
+
+    return updatedProfile;
   }
 
   private async ensureUserExists(userId: string): Promise<void> {

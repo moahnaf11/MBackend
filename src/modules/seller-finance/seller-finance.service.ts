@@ -19,6 +19,8 @@ import { ListLedgerDto } from "./dto/list-ledger.dto";
 import { ListPayoutsDto } from "./dto/list-payouts.dto";
 import { RequestPayoutDto } from "./dto/request-payout.dto";
 import { UpdatePayoutStatusDto } from "./dto/update-payout-status.dto";
+import { OutboxService } from "../../common/outbox/outbox.service";
+import { NotificationEvents } from "../notifications/constants/notification-events";
 
 @Injectable()
 export class SellerFinanceService {
@@ -29,7 +31,10 @@ export class SellerFinanceService {
     [PayoutStatus.FAILED]: [],
     [PayoutStatus.CANCELLED]: [],
   };
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly outboxService: OutboxService,
+  ) {}
 
   // ─── private helpers ──────────────────────────────────────────────────────
 
@@ -461,10 +466,30 @@ export class SellerFinanceService {
       }
     });
 
-    return this.prisma.sellerPayout.findUnique({
+    const updated = await this.prisma.sellerPayout.findUnique({
       where: { id: payoutId },
-      include: { bankAccount: true, seller: { select: { storeName: true, slug: true } } },
+      include: {
+        bankAccount: true,
+        seller: { select: { storeName: true, slug: true, userId: true } },
+      },
     });
+
+    if (dto.status === PayoutStatus.PAID && updated?.seller.userId) {
+      await this.outboxService.emit(
+        NotificationEvents.PAYOUT_PAID,
+        {
+          userId: updated.seller.userId,
+          sellerId: updated.sellerId,
+          amount: updated.amount.toString(),
+          currency: updated.currency,
+          payoutId,
+        },
+        payoutId,
+        "SellerPayout",
+      );
+    }
+
+    return updated;
   }
 
   // ─── ADMIN: list all payouts ──────────────────────────────────────────────

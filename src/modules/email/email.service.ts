@@ -96,4 +96,15 @@ export class EmailService {
       `,
     });
   }
+
+  // Add this single method to your existing email.service.ts
+
+  async sendMail(to: string, subject: string, html: string): Promise<void> {
+    await this.resend.emails.send({
+      from: this.config.getOrThrow<string>("EMAIL_FROM"),
+      to,
+      subject,
+      html,
+    });
+  }
 }

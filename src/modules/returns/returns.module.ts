@@ -7,9 +7,10 @@ import { ReturnsController } from "./returns.controller";
 import { ReturnsService } from "./returns.service";
 import { PaymentsModule } from "../payments/payments.module";
 import { InventoryModule } from "../inventory/inventory.module";
+import { OutboxModule } from "../../common/outbox/outbox.module";
 
 @Module({
-  imports: [OrdersModule, ShipmentsModule, PaymentsModule, InventoryModule],
+  imports: [OrdersModule, ShipmentsModule, PaymentsModule, InventoryModule, OutboxModule],
   controllers: [ReturnsController],
   providers: [ReturnsService, PrismaService],
   exports: [ReturnsService],

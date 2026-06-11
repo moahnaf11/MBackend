@@ -31,6 +31,7 @@ import { PromotionsModule } from "./modules/promotions/promotions.module";
 import { SellerFinanceModule } from "./modules/seller-finance/seller-finance.module";
 import { WishlistModule } from "./modules/wishlist/wishlist.module";
 import { ProductQaModule } from "./modules/productQnA/productqa.module";
+import { NotificationsModule } from "./modules/notifications/notifications.module";
 
 @Module({
   imports: [
@@ -96,6 +97,7 @@ import { ProductQaModule } from "./modules/productQnA/productqa.module";
     SellerFinanceModule,
     WishlistModule,
     ProductQaModule,
+    NotificationsModule,
     FulfillmentModule,
   ],
 })

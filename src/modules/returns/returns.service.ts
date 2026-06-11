@@ -7,6 +7,8 @@ import { OrderStatus, ReturnRequestStatus } from "../../../generated/prisma/enum
 import { UpdateReturnStatusDto } from "./dto/update-return-request.dto";
 import { PaymentsService } from "../payments/payments.service";
 import { InventoryService } from "../inventory/inventory.service";
+import { OutboxService } from "../../common/outbox/outbox.service";
+import { NotificationEvents } from "../notifications/constants/notification-events";
 
 @Injectable()
 export class ReturnsService {
@@ -29,6 +31,7 @@ export class ReturnsService {
     private readonly shipmentsService: ShipmentsService,
     private readonly paymentsService: PaymentsService,
     private readonly inventoryService: InventoryService,
+    private readonly outboxService: OutboxService,
   ) {}
 
   // ─────────────────────────────────────────────
@@ -106,6 +109,18 @@ export class ReturnsService {
         items: true,
       },
     });
+
+    await this.outboxService.emit(
+      NotificationEvents.RETURN_REQUESTED,
+      {
+        userId,
+        orderId,
+        orderNumber: order.orderNumber,
+        returnRequestId: returnRequest.id,
+      },
+      returnRequest.id,
+      "ReturnRequest",
+    );
 
     return returnRequest;
   }
@@ -282,6 +297,26 @@ export class ReturnsService {
         closedAt: new Date(),
       },
     });
+
+    // Fetch order number for the notification payload
+    const order = await this.prisma.order.findUnique({
+      where: { id: request.orderId },
+      select: { orderNumber: true },
+    });
+
+    if (request.requestedById && order) {
+      await this.outboxService.emit(
+        NotificationEvents.RETURN_APPROVED,
+        {
+          userId: request.requestedById,
+          orderId: request.orderId,
+          orderNumber: order.orderNumber,
+          returnRequestId: id,
+        },
+        id,
+        "ReturnRequest",
+      );
+    }
 
     return updated;
   }
