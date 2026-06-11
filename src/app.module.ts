@@ -33,6 +33,7 @@ import { WishlistModule } from "./modules/wishlist/wishlist.module";
 import { ProductQaModule } from "./modules/productQnA/productqa.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { FraudFlagsModule } from "./modules/fraud-flags/fraud-flags.module";
+import { TaxRulesModule } from "./modules/tax-rules/tax-rules.module";
 
 @Module({
   imports: [
@@ -100,6 +101,7 @@ import { FraudFlagsModule } from "./modules/fraud-flags/fraud-flags.module";
     ProductQaModule,
     NotificationsModule,
     FraudFlagsModule,
+    TaxRulesModule,
     FulfillmentModule,
   ],
 })
