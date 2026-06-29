@@ -1,5 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { IsEmail, IsString, MaxLength, MinLength } from "class-validator";
+import { Match } from "./decorators/match.decorator";
 
 export class RegisterDto {
   @ApiProperty({ example: "customer@example.com" })
@@ -11,6 +12,13 @@ export class RegisterDto {
   @MinLength(8)
   @MaxLength(128)
   password!: string;
+
+  @ApiProperty({ minLength: 8 })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(128)
+  @Match("password", { message: "Confirm Password must match password" })
+  confirmPassword!: string;
 
   @ApiProperty({ example: "Ahnaf" })
   @IsString()
