@@ -36,6 +36,7 @@ type PublicUser = {
   firstName: string | null;
   lastName: string | null;
   roles: UserRole[];
+  emailVerifiedAt: Date | null;
 };
 
 type AuthResult = {
@@ -474,6 +475,7 @@ export class AuthService {
       firstName: user.firstName,
       lastName: user.lastName,
       roles: user.roles,
+      emailVerifiedAt: user.emailVerifiedAt,
     };
   }
 

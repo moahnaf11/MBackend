@@ -180,7 +180,7 @@ async function main() {
   const extraCustomers = await Promise.all([
     prisma.user.create({
       data: {
-        email: "customer2@example.com",
+        email: "customer3@example.com",
         passwordHash,
         firstName: "Ahmed",
         lastName: "Mansour",
@@ -192,7 +192,7 @@ async function main() {
     }),
     prisma.user.create({
       data: {
-        email: "customer3@example.com",
+        email: "customer4@example.com",
         passwordHash,
         firstName: "Lara",
         lastName: "Nasser",
